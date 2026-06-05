@@ -68,6 +68,162 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Root: simple HTML dashboard (no Streamlit needed) ───────────────────────
+
+_DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ApplyPilot - AI Job Assistant</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0e1117; color: #e0e0e0; padding: 20px; }
+  .container { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 28px; margin-bottom: 8px; }
+  .subtitle { color: #888; margin-bottom: 24px; }
+  .card { background: #1a1c23; border-radius: 12px; padding: 20px; margin-bottom: 16px; border: 1px solid #2a2c33; }
+  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .card-title { font-size: 18px; font-weight: 600; }
+  .badge { padding: 4px 10px; border-radius: 20px; font-size: 14px; font-weight: 600; }
+  .badge-green { background: #1a3a2a; color: #4ade80; }
+  .badge-yellow { background: #3a2e1a; color: #facc15; }
+  .badge-orange { background: #3a201a; color: #fb923c; }
+  .badge-red { background: #3a1a1a; color: #f87171; }
+  .badge-gray { background: #2a2a2a; color: #999; }
+  .company { color: #60a5fa; font-size: 14px; }
+  .location { color: #888; font-size: 13px; }
+  .desc { color: #999; font-size: 14px; line-height: 1.5; margin-top: 8px; }
+  .btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; margin-right: 8px; margin-top: 12px; }
+  .btn-primary { background: #2563eb; color: white; }
+  .btn-secondary { background: #333; color: #ccc; }
+  .btn:hover { opacity: 0.85; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .controls { display: flex; gap: 12px; margin-bottom: 24px; align-items: center; flex-wrap: wrap; }
+  .controls button { padding: 10px 24px; font-size: 15px; }
+  .stats { display: flex; gap: 20px; margin-bottom: 20px; }
+  .stat { background: #1a1c23; border-radius: 10px; padding: 16px 20px; text-align: center; border: 1px solid #2a2c33; }
+  .stat-value { font-size: 28px; font-weight: 700; }
+  .stat-label { font-size: 12px; color: #888; margin-top: 4px; }
+  .status-bar { padding: 8px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+  .status-running { background: #1a2a3a; color: #60a5fa; }
+  .status-done { background: #1a3a2a; color: #4ade80; }
+  .status-error { background: #3a1a1a; color: #f87171; }
+  .no-jobs { text-align: center; padding: 60px 20px; color: #666; }
+  .result-box { background: #111; border-radius: 8px; padding: 16px; margin-top: 12px; font-family: monospace; font-size: 13px; white-space: pre-wrap; max-height: 300px; overflow-y: auto; color: #aaa; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📋 ApplyPilot</h1>
+  <p class="subtitle">AI Job Application Assistant — Course Project Demo</p>
+
+  <div class="controls">
+    <button class="btn btn-primary" onclick="startPipeline()">🚀 Start Pipeline</button>
+    <button class="btn btn-secondary" onclick="loadJobs()">🔄 Refresh Jobs</button>
+    <span id="statusText" style="color:#888;">Ready</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="stat-value" id="statTotal">-</div><div class="stat-label">Total Jobs</div></div>
+    <div class="stat"><div class="stat-value" id="statScored">-</div><div class="stat-label">Scored</div></div>
+    <div class="stat"><div class="stat-value" id="statTailored">-</div><div class="stat-label">Tailored</div></div>
+  </div>
+
+  <div id="statusBar"></div>
+  <div id="jobsContainer"><div class="no-jobs">Click <b>Start Pipeline</b> to begin</div></div>
+</div>
+
+<script>
+const API = '';
+
+function badge(score) {
+  if (score == null) return ['⏳','badge-gray'];
+  if (score >= 7) return [score+'/10','badge-green'];
+  if (score >= 5) return [score+'/10','badge-yellow'];
+  if (score >= 3) return [score+'/10','badge-orange'];
+  return [score+'/10','badge-red'];
+}
+
+async function loadJobs() {
+  try {
+    const r = await fetch(API + '/jobs');
+    const jobs = await r.json();
+    const r2 = await fetch(API + '/stats');
+    const stats = await r2.json();
+    document.getElementById('statTotal').textContent = stats.total || 0;
+    document.getElementById('statScored').textContent = stats.scored || 0;
+    document.getElementById('statTailored').textContent = stats.tailored || 0;
+    if (!jobs.length) {
+      document.getElementById('jobsContainer').innerHTML = '<div class="no-jobs">No jobs yet. Click <b>Start Pipeline</b>.</div>';
+      return;
+    }
+    document.getElementById('jobsContainer').innerHTML = jobs.map(j => {
+      const [label, cls] = badge(j.score);
+      return `<div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">${j.title || 'Untitled'}</div>
+            <div class="company">${j.company || 'Unknown'}</div>
+            <div class="location">${j.location||''} ${j.salary?'· '+j.salary:''}</div>
+          </div>
+          <span class="badge ${cls}">${label}</span>
+        </div>
+        <div class="desc">${(j.description||'').slice(0,400)}</div>
+        <button class="btn btn-primary" onclick="tailor('${j.id}')" ${j.score ? '' : 'disabled'}>✂️ Tailor Resume</button>
+        <button class="btn btn-secondary" onclick="cover('${j.id}')" ${j.score ? '' : 'disabled'}>📧 Cover Letter</button>
+        <div id="result-${j.id}"></div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('jobsContainer').innerHTML = '<div class="no-jobs">Cannot connect to server</div>';
+  }
+}
+
+async function startPipeline() {
+  document.getElementById('statusBar').innerHTML = '<div class="status-bar status-running">⏳ Pipeline running...</div>';
+  document.getElementById('statusText').textContent = 'Running...';
+  await fetch(API + '/start_pipeline', {method:'POST'});
+  let attempts = 0;
+  while (attempts < 30) {
+    await new Promise(r => setTimeout(r, 2000));
+    const r = await fetch(API + '/status');
+    const s = await r.json();
+    if (s.stage === 'done') { break; }
+    if (s.stage === 'error') { break; }
+    attempts++;
+  }
+  document.getElementById('statusBar').innerHTML = '<div class="status-bar status-done">✅ Pipeline complete</div>';
+  document.getElementById('statusText').textContent = 'Done';
+  loadJobs();
+}
+
+async function tailor(id) {
+  document.getElementById('result-'+id).innerHTML = '<div class="result-box">Generating...</div>';
+  const r = await fetch(API + '/tailor/' + id, {method:'POST'});
+  const d = await r.json();
+  document.getElementById('result-'+id).innerHTML = '<div class="result-box"><b>Tailored Resume:</b>\n' + (d.resume||d.error||'Error').slice(0,2000) + '</div>';
+}
+
+async function cover(id) {
+  document.getElementById('result-'+id).innerHTML = '<div class="result-box">Generating...</div>';
+  const r = await fetch(API + '/cover/' + id, {method:'POST'});
+  const d = await r.json();
+  document.getElementById('result-'+id).innerHTML = '<div class="result-box"><b>Cover Letter:</b>\n' + (d.cover_letter||d.error||'Error').slice(0,1500) + '</div>';
+}
+
+loadJobs();
+</script>
+</body>
+</html>"""
+
+
+@app.get("/")
+async def dashboard():
+    """Serve a simple HTML dashboard (no Streamlit needed)."""
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=_DASHBOARD_HTML)
+
 # ── Global pipeline status (polled by frontend) ────────────────────────────
 
 pipeline_status: dict = {"stage": "idle", "progress": 0}

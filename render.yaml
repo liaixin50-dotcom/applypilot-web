@@ -1,0 +1,16 @@
+# Render.com — one-click deploy for ApplyPilot
+# Deploy URL: https://render.com/deploy?repo=https://github.com/liaixin50-dotcom/applypilot-web
+services:
+  - type: web
+    name: applypilot
+    env: python
+    region: singapore
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONPATH
+        value: .
+    autoDeploy: true
