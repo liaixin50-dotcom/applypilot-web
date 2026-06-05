@@ -1,0 +1,17 @@
+# Render.com — one-click backend deploy
+# https://dashboard.render.com → New → Web Service → point to this repo
+services:
+  - type: web
+    name: applypilot-api
+    env: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: APPLYPILOT_DIR
+        value: /data
+      - key: PYTHONPATH
+        value: .
+    autoDeploy: true
