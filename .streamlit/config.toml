@@ -1,0 +1,16 @@
+[server]
+# Prevent stale JS cache after restart
+enableXsrfProtection = false
+maxUploadSize = 10
+
+# Disable file watcher to prevent unnecessary reloads that break JS imports
+runOnSave = false
+
+[browser]
+# Prevent browser from caching old JS bundles after server restart
+serverAddress = "0.0.0.0"
+gatherUsageStats = false
+
+[global]
+# Suppress spurious warnings
+showWarningOnDirectExecution = false

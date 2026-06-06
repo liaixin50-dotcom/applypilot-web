@@ -1,0 +1,54 @@
+{
+  "personal": {
+    "full_name": "Aixin Li",
+    "email": "liaixin50@gmail.com",
+    "phone": "(086)15695196785",
+    "city": "Hong Kong",
+    "country": "China"
+  },
+  "experience": {
+    "years_of_experience_total": "2",
+    "education_level": "Master's Degree",
+    "target_role": "Marketing Specialist"
+  },
+  "skills_boundary": {
+    "languages": [
+      "Python",
+      "English",
+      "Mandarin",
+      "Japanese"
+    ],
+    "tools": [
+      "Claude code",
+      "MS Office",
+      "SPSS",
+      "Photoshop",
+      "Premiere"
+    ],
+    "frameworks": [
+      "Data Analysis",
+      "Digital Marketing",
+      "Content Creation"
+    ]
+  },
+  "resume_facts": {
+    "preserved_companies": [
+      "Fosun Pharma",
+      "Golden Education",
+      "Rexnord",
+      "The Chinese University of Hong Kong"
+    ],
+    "preserved_school": "The Chinese University of Hong Kong"
+  },
+  "work_authorization": {
+    "legally_authorized_to_work": "Yes",
+    "require_sponsorship": "No"
+  },
+  "availability": {
+    "earliest_start_date": "Immediately"
+  },
+  "compensation": {
+    "salary_expectation": "6000",
+    "salary_currency": "HKD"
+  }
+}
