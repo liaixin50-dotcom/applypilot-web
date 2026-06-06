@@ -93,49 +93,6 @@ def store_jobs(conn: sqlite3.Connection, jobs: list[dict],
     return new, existing
 
 
-def query_scored_jobs(
-    conn: sqlite3.Connection | None = None,
-    min_score: int = 0,
-    sort_by: str = "score_desc",
-    offset: int = 0,
-    limit: int = 50,
-) -> tuple[list[dict], int]:
-    """Return (matching jobs, total_matching_count) with SQL-level filter/sort/page.
-
-    sort_by: "score_desc", "score_asc", or "newest"
-    """
-    if conn is None:
-        conn = get_connection()
-
-    score_expr = "COALESCE(fit_score, 0)"
-
-    # Total matching count (for pagination)
-    total = conn.execute(
-        f"SELECT COUNT(*) FROM jobs WHERE {score_expr} >= ?",
-        (min_score,),
-    ).fetchone()[0]
-
-    # Sort mapping
-    order_map = {
-        "score_desc": f"{score_expr} DESC, discovered_at DESC",
-        "score_asc": f"{score_expr} ASC, discovered_at DESC",
-        "newest": "discovered_at DESC",
-    }
-    order = order_map.get(sort_by, order_map["score_desc"])
-
-    query = f"""
-        SELECT * FROM jobs
-        WHERE {score_expr} >= ?
-        ORDER BY {order}
-        LIMIT ? OFFSET ?
-    """
-    rows = conn.execute(query, (min_score, limit, offset)).fetchall()
-    if rows:
-        cols = rows[0].keys()
-        return [dict(zip(cols, r)) for r in rows], total
-    return [], total
-
-
 def get_all_jobs(conn: sqlite3.Connection | None = None,
                  status: str | None = None,
                  limit: int = 100) -> list[dict]:

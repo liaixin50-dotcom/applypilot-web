@@ -50,7 +50,7 @@ try:
     _BACKEND = _HERE.parent / "backend"
     if str(_BACKEND) not in sys.path:
         sys.path.insert(0, str(_BACKEND))
-    from applypilot_core.database import get_connection, query_scored_jobs, store_jobs
+    from applypilot_core.database import get_connection, get_all_jobs, store_jobs
     from applypilot_core.tailor import _extract_keywords
 except Exception as _e:
     st.error(f"Backend init failed: {_e}")
@@ -81,8 +81,8 @@ PAGE_SIZE = 50  # jobs per page
 # Session state init
 # ═════════════════════════════════════════════════════════════════════════════
 for key, default in [
-    ("search_done", False), ("searching", False), ("display_offset", 0),
-    ("uploaded_resume_name", ""), ("_prev_filter", None),
+    ("all_jobs", []), ("display_count", 0), ("search_done", False),
+    ("scoring_done", False), ("searching", False), ("uploaded_resume_name", ""),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -376,14 +376,15 @@ with st.sidebar:
         }
         st.session_state["searching"] = True
         st.session_state["search_done"] = False
-        st.session_state["display_offset"] = 0
-        st.session_state["_prev_filter"] = None
+        st.session_state["all_jobs"] = []
+        st.session_state["display_count"] = 0
+        st.session_state["scoring_done"] = False
         st.rerun()
 
     st.divider()
 
     # ── Post-search actions ─────────────────────────────────────────────
-    if st.session_state.get("search_done"):
+    if st.session_state.get("search_done") and st.session_state.get("all_jobs"):
         st.header("📊 Post-Search")
         # Show score distribution
         try:
@@ -498,7 +499,8 @@ if st.session_state.get("searching"):
             n_scored = _run_scoring(conn=conn)
             st.write(f"📊 Scored **{n_scored}** jobs")
 
-            st.session_state["display_offset"] = 0
+            st.session_state["all_jobs"] = raw_jobs
+            st.session_state["display_count"] = min(PAGE_SIZE, len(raw_jobs))
             st.session_state["search_done"] = True
             status.update(label=f"✅ Done — {len(raw_jobs)} jobs, {n_scored} scored", state="complete")
 
@@ -513,132 +515,129 @@ if st.session_state.get("searching"):
 # Main: Job Results
 # ═════════════════════════════════════════════════════════════════════════════
 
-if st.session_state.get("search_done"):
+if st.session_state.get("search_done") and st.session_state.get("all_jobs"):
+    all_jobs = st.session_state["all_jobs"]
+    display_n = st.session_state.get("display_count", PAGE_SIZE)
+
+    # Read scores from DB
     conn = get_connection(str(DB_PATH))
+    rows = get_all_jobs(conn, limit=9999)
+    db_map = {r["url"]: r for r in rows}
     db_total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
+    # Detect stale session state (e.g. after server restart)
     if db_total == 0:
-        st.warning("⚠️ No jobs in database. Please click Search again.")
+        st.warning("⚠️ Session expired — database was reset. Please click Search again.")
         st.session_state["search_done"] = False
         st.stop()
 
-    # ── Filter controls ──────────────────────────────────────────────────
+    st.header(f"📋 Search Results ({len(all_jobs):,} jobs found)")
+    # Show score summary
+    scored_count = sum(1 for r in rows if r.get("fit_score") is not None)
+    if scored_count > 0:
+        avg_score = sum(r["fit_score"] for r in rows if r.get("fit_score") is not None) / scored_count
+        st.info(f"📊 **{scored_count}** jobs scored | Average match: **{avg_score:.1f}/10**")
+    else:
+        st.warning("⚠️ Scores not yet computed. Please click Search again.")
+        st.session_state["search_done"] = False
+        st.stop()
+
+    # Filters
     c1, c2 = st.columns(2)
     with c1:
-        min_score = st.slider("Minimum Score", 0, 10, 0, key="score_filter_slider")
+        min_score = st.slider("Minimum Score", 0, 10, 0)
     with c2:
-        sort_ui = st.selectbox(
-            "Sort by",
-            ["Score (high first)", "Score (low first)", "Newest"],
-            index=0, key="sort_select",
-        )
-    sort_map = {
-        "Score (high first)": "score_desc",
-        "Score (low first)": "score_asc",
-        "Newest": "newest",
-    }
+        sort_by = st.selectbox("Sort by", ["Score (high first)", "Score (low first)", "Newest"], index=0)
 
-    # Reset pagination if filter/sort changed
-    prev = st.session_state.get("_prev_filter")
-    curr = (min_score, sort_ui)
-    if prev != curr:
-        st.session_state["display_offset"] = 0
-        st.session_state["_prev_filter"] = curr
+    # Prepare display list
+    display_jobs = []
+    for j in all_jobs[:display_n]:
+        db_row = db_map.get(j.get("url", ""))
+        score = db_row.get("fit_score") if db_row else None
+        if min_score > 0 and (score is None or score < min_score):
+            continue
+        display_jobs.append({
+            "id": hashlib.md5(j.get("url", "").encode()).hexdigest()[:12],
+            "url": j.get("url", ""),
+            "title": db_row.get("title") if db_row else j.get("title", "?"),
+            "company": db_row.get("company") if db_row else j.get("company"),
+            "location": j.get("location", "HK"),
+            "salary": j.get("salary"),
+            "description": (db_row.get("full_description") if db_row else None) or j.get("description", ""),
+            "score": score,
+            "score_reasoning": db_row.get("score_reasoning") if db_row else None,
+            "pipeline_status": db_row.get("pipeline_status", "discovered") if db_row else "discovered",
+        })
 
-    # ── Query DB with filtering + sorting + pagination ───────────────────
-    offset = st.session_state.get("display_offset", 0)
-    display_jobs, total_matching = query_scored_jobs(
-        conn, min_score=min_score, sort_by=sort_map[sort_ui],
-        offset=offset, limit=PAGE_SIZE,
-    )
-
-    # ── Centralized header + stats ────────────────────────────────────────
-    st.header(f"📋 Search Results ({total_matching:,} jobs match | {db_total:,} total)")
-    scored_count = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL"
-    ).fetchone()[0]
-    if scored_count > 0:
-        avg = conn.execute(
-            "SELECT AVG(COALESCE(fit_score,0)) FROM jobs"
-        ).fetchone()[0]
-        st.info(f"📊 **{scored_count}** jobs scored | Average: **{avg:.1f}/10**")
+    # Sort
+    if sort_by.startswith("Score"):
+        display_jobs.sort(key=lambda j: j.get("score") or 0, reverse=sort_by == "Score (high first)")
     else:
-        st.warning("⚠️ No scores computed yet.")
+        display_jobs.reverse()  # newest first approximation
 
-    # ── Empty-state: no jobs match filter ─────────────────────────────────
-    if total_matching == 0:
-        max_score_row = conn.execute(
-            "SELECT MAX(COALESCE(fit_score,0)) FROM jobs"
-        ).fetchone()
-        max_s = max_score_row[0] if max_score_row else 0
-        if max_s == 0:
-            st.info("ℹ️ All jobs currently have a score of 0. Upload a detailed resume and search again for better matching.")
-        else:
-            st.info(f"ℹ️ No jobs match score ≥ {min_score}. Highest available: **{max_s}/10**. Try lowering the slider.")
+    st.caption(f"Showing {len(display_jobs)} jobs (score ≥ {min_score})")
 
-    # ── Job cards ─────────────────────────────────────────────────────────
     for job in display_jobs:
-        score = job.get("fit_score")
-        s, _ = _score_badge(score)
+        s, badge_cls = _score_badge(job.get("score"))
 
-        label = f"`[{s}]` {job.get('title','?')} — *{job.get('company','?')}*"
+        expander_label = f"`[{s}]` {job['title']} — *{job.get('company', '?')}*"
         if job.get("location"):
-            label += f" | {job['location']}"
+            expander_label += f" | {job['location']}"
         if job.get("salary"):
-            label += f" | {job['salary']}"
+            expander_label += f" | {job['salary']}"
 
-        with st.expander(label):
+        with st.expander(expander_label):
+            # ── Link to original job posting (always visible) ────────────
             job_url = job.get("url", "")
-            st.markdown(f"🔗 [**View Original Job Posting on JobsDB**]({job_url})")
+            st.markdown(
+                f"🔗 [**View Original Job Posting on JobsDB**]({job_url})  "
+                f"*(opens in new tab)*",
+                unsafe_allow_html=False,
+            )
 
             c1, c2 = st.columns([3, 1])
             with c1:
-                desc = (job.get("full_description") or job.get("description") or "")
+                desc = job.get("description") or ""
                 if desc and len(desc) > 50:
+                    # Show job description
                     st.markdown("**📝 Job Description:**")
                     st.caption(desc[:800])
                 elif desc:
                     st.caption(desc[:300])
                 else:
-                    st.info("📝 Full description not loaded. Click the link above to view the complete job posting.")
+                    st.info("📝 Full job description not loaded. Click the link above to view the complete job posting on JobsDB.")
+
                 if job.get("score_reasoning"):
                     with st.expander("🔍 Score Details"):
                         st.text(job["score_reasoning"][:400])
             with c2:
-                st.markdown(f"Status: `{job.get('pipeline_status','?')}`")
+                st.markdown(f"Status: `{job.get('pipeline_status', '?')}`")
                 if job.get("salary"):
                     st.metric("Salary", job["salary"])
-                jid = hashlib.md5(job.get("url","").encode()).hexdigest()[:12]
-                if st.button("✂️ Tailor", key=f"btn_t_{jid}", use_container_width=True):
+                btn_key = job["id"]
+                if st.button("✂️ Tailor", key=f"btn_t_{btn_key}", use_container_width=True):
                     r = _tailor(job["url"], conn)
-                    if "error" in r:
-                        st.error(r["error"])
-                    else:
-                        st.session_state[f"data_t_{jid}"] = r
-                if st.button("📧 Cover", key=f"btn_c_{jid}", use_container_width=True):
+                    st.session_state[f"data_t_{btn_key}"] = r
+                if st.button("📧 Cover", key=f"btn_c_{btn_key}", use_container_width=True):
                     r = _cover(job["url"], conn)
-                    if "error" in r:
-                        st.error(r["error"])
-                    else:
-                        st.session_state[f"data_c_{jid}"] = r
+                    st.session_state[f"data_c_{btn_key}"] = r
 
-            if f"data_t_{jid}" in st.session_state:
+            if f"data_t_{btn_key}" in st.session_state:
                 st.divider()
                 st.markdown("**✂️ Tailored Resume**")
-                st.text_area("Resume", st.session_state[f"data_t_{jid}"].get("resume",""),
-                             height=250, key=f"area_ta_{jid}")
-            if f"data_c_{jid}" in st.session_state:
+                st.text_area("Resume", st.session_state[f"data_t_{btn_key}"]["resume"],
+                             height=250, key=f"area_ta_{btn_key}")
+            if f"data_c_{btn_key}" in st.session_state:
                 st.divider()
                 st.markdown("**📧 Cover Letter**")
-                st.text_area("Cover", st.session_state[f"data_c_{jid}"].get("cover_letter",""),
-                             height=200, key=f"area_ca_{jid}")
+                st.text_area("Cover", st.session_state[f"data_c_{btn_key}"]["cover_letter"],
+                             height=200, key=f"area_ca_{btn_key}")
 
-    # ── Load More (respects filtered count) ──────────────────────────────
-    shown = offset + len(display_jobs)
-    remaining = total_matching - shown
-    if remaining > 0:
-        if st.button(f"📥 Load More ({remaining} matching jobs)", use_container_width=True):
-            st.session_state["display_offset"] = shown
+    # Load More button
+    if display_n < len(all_jobs):
+        remaining = len(all_jobs) - display_n
+        if st.button(f"📥 Load More ({remaining} remaining)", use_container_width=True):
+            st.session_state["display_count"] = min(display_n + PAGE_SIZE, len(all_jobs))
             st.rerun()
 
 elif not st.session_state.get("searching"):

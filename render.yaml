@@ -1,16 +1,16 @@
-# Render.com — one-click deploy for ApplyPilot
-# Deploy URL: https://render.com/deploy?repo=https://github.com/liaixin50-dotcom/applypilot-web
+# Render.com Blueprint — one-click permanent deployment
+# 1. Push this repo to GitHub
+# 2. Go to https://dashboard.render.com → New → Web Service
+# 3. Connect your GitHub repo → Render auto-detects this file
 services:
   - type: web
     name: applypilot
-    env: python
+    env: docker
     region: singapore
     plan: free
-    rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /_stcore/health
     envVars:
       - key: PYTHONPATH
-        value: .
+        value: backend
     autoDeploy: true
